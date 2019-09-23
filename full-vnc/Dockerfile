@@ -1,32 +1,58 @@
-FROM gitpod/workspace-full:latest
+FROM gitpod/workspace-full-vnc:latest
 
 USER root
 
-# Install Xvfb, JavaFX-helpers and Openbox window manager
+# CUSTOM // Erlang/Elixir ######
+
+# Important!  Update this no-op ENV variable when this Dockerfile
+# is updated with the current date. It will force refresh of all
+# of the base images and things like `apt-get update` won't be using
+# old cached versions when the Dockerfile is built.
+ENV REFRESHED_AT=2019-07-12 \
+    LANG=en_US.UTF-8 \
+    HOME=/opt/app/ \
+    TERM=xterm \
+    ERLANG_VERSION=22.1.0 \
+    ELIXIR_VERSION=1.9.1-otp-22
+
+# Install custom tools, runtime, etc.
 RUN apt-get update \
-    && apt-get install -yq xvfb x11vnc xterm openjfx libopenjfx-java openbox \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
+    # window manager
+    && apt-get install -y jwm \
+    # electron
+    && apt-get install -y libgtk-3-0 libnss3 libasound2 \
+    # native-keymap
+    && apt-get install -y libx11-dev libxkbfile-dev \
 
-# overwrite this env variable to use a different window manager
-ENV WINDOW_MANAGER="openbox"
+    # CUSTOM // build tools
+    && apt-get install build-essential git wget libssl-dev libreadline-dev libncurses5-dev zlib1g-dev m4 curl wx-common libwxgtk3.0-dev autoconf \
+    && apt-get install libxml2-utils xsltproc fop unixodbc unixodbc-bin unixodbc-dev \
 
-# Install novnc
-RUN git clone https://github.com/novnc/noVNC.git /opt/novnc \
-    && git clone https://github.com/novnc/websockify /opt/novnc/utils/websockify
-COPY novnc-index.html /opt/novnc/index.html
+    && apt-get clean && rm -rf /var/cache/apt/* && rm -rf /var/lib/apt/lists/* && rm -rf /tmp/*
 
-# Add VNC startup script
-COPY start-vnc-session.sh /usr/bin/
-RUN chmod +x /usr/bin/start-vnc-session.sh
+USER gitpod
 
-# This is a bit of a hack. At the moment we have no means of starting background
-# tasks from a Dockerfile. This workaround checks, on each bashrc eval, if the X
-# server is running on screen 0, and if not starts Xvfb, x11vnc and novnc.
-RUN echo "export DISPLAY=:0" >> ~/.bashrc
-RUN echo "[ ! -e /tmp/.X0-lock ] && (/usr/bin/start-vnc-session.sh &> /tmp/display-\${DISPLAY}.log)" >> ~/.bashrc
+# Apply user-specific settings
+RUN bash -c ". .nvm/nvm.sh \
+    && nvm install 10 \
+    && nvm use 10 \
+    && npm install -g yarn"
 
-### checks ###
-# no root-owned files in the home directory
-RUN notOwnedFile=$(find . -not "(" -user gitpod -and -group gitpod ")" -print -quit) \
-    && { [ -z "$notOwnedFile" ] \
-        || { echo "Error: not all files/dirs in $HOME are owned by 'gitpod' user & group"; exit 1; } }
+# CUSTOM // asdf-vm install
+RUN cd \
+    && git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.7.4 \
+    # For Ubuntu or other linux distros
+    && echo '. $HOME/.asdf/asdf.sh' >> ~/.bashrc \
+    && echo '. $HOME/.asdf/completions/asdf.bash' >> ~/.bashrc \
+
+    # CUSTOM // install erlang/elixir
+RUN bash \
+    && asdf plugin-add erlang \
+    && asdf install erlang $ERLANG_VERSION \
+    && asdf global erlang $ERLANG_VERSION \
+    && asdf plugin-add elixir \
+    && asdf install elixir $ELIXIR_VERSION \
+    && asdf global elixir $ELIXIR_VERSION
+
+# Give back control
+USER root
